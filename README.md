@@ -2,7 +2,7 @@
 
 To run you need matplotlib and kiwi solver.  `pip install git+https://github.com/nucleic/kiwi.git` is needed to use the latest `python3` version.  
 
-This is just lightly modified from https://github.com/Tillsten/MplLayouter
+This is just lightly modified from https://github.com/Tillsten/MplLayouter who did the real work here.
 
 See https://github.com/matplotlib/matplotlib/issues/1109
 
