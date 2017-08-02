@@ -9,3 +9,5 @@ Status: its pretty messy, but does what I want.  Todo: clean up methods, and com
 Figure out how to add subsidiary axes like colorbars.
 
 Long term, turn into a MEP
+
+<img width="645" alt="example" src="https://user-images.githubusercontent.com/1562854/28897939-03043d40-7798-11e7-8925-a7fbcca004a6.png">
