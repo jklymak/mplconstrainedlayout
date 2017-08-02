@@ -14,6 +14,8 @@ Figure out how to add subsidiary axes like colorbars.
 
 Figure out why top and right text labels are sticky to the right instead of sticky to the AxesTick object.  (i.e. title2 below, and "right" below).  
 
+See if this procedure is robust on other backends.  So far it doesn't work at all on `nbagg` because it doesn't seem to do `figure.transFigure` properly.  (??)
+
 Long term, turn into a MEP
 
 <img width="645" alt="example" src="https://user-images.githubusercontent.com/1562854/28897939-03043d40-7798-11e7-8925-a7fbcca004a6.png">
