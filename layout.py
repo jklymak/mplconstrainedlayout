@@ -5,7 +5,7 @@
 from __future__ import division, print_function
 import kiwisolver as kiwi
 import matplotlib
-#matplotlib.use('Qt5Agg')
+matplotlib.use('Qt5Agg')
 from matplotlib import pyplot as plt
 
 Variable = kiwi.Variable
@@ -75,6 +75,7 @@ class Box(object):
              (self.pref_height == self.height)]
         for i in c:
             sol.addConstraint(i|0.000001)
+
 
     def set_geometry(self, left, bottom, right, top, strength=1e9):
         sol = self.solver
@@ -164,13 +165,11 @@ def stack(items, direction):
         constraints.append(c)
     return constraints
 
-
 def hstack(items, padding=0):
     constraints = []
     for i in range(1, len(items)):
         constraints.append(items[i-1].right+padding <= items[i].left)
     return constraints
-
 
 def vstack(items, padding=0):
     constraints = []
@@ -178,32 +177,16 @@ def vstack(items, padding=0):
         constraints.append(items[i-1].bottom-padding >= items[i].top)
     return constraints
 
+def vstacktight(items, padding=0):
+    constraints = []
+    for i in range(1, len(items)):
+        constraints.append((items[i-1].bottom-padding == items[i].top)| 2.e8)
+        print(constraints[-1])
+    return constraints
 
 def get_text_size(mpl_txt, renderer):
     bbox = mpl_txt.get_window_extent(renderer)
     return bbox.width, bbox.height
-
-class TickContainer(Box):
-    def __init__(self, parent, name):
-        # parent is the axis
-        # wth does this do?
-        super(TickContainer, self).__init__(parent, name)
-
-    def set_mpl_text(self, txt):
-        self.mpl_text = txt
-        txt.set_figure(self.parent.figure)
-        self.parent.figure.texts.append(txt)
-        text_ex = get_text_size(txt, self.parent.renderer)
-        print('text_ex',text_ex)
-        self.solver.suggestValue(self.min_width, text_ex[0]*2.)
-        self.solver.suggestValue(self.min_height, text_ex[1]*2.)
-
-    def place(self):
-        txt = self.mpl_text
-        if txt is not None:
-            txt.set_position((self.left.value(),
-                              self.bottom.value()))
-
 
 class TextContainer(Box):
     def __init__(self, parent, name):
@@ -218,12 +201,12 @@ class TextContainer(Box):
         self.parent.figure.texts.append(txt)
         text_ex = get_text_size(txt, self.parent.renderer)
         print("Text_ex",text_ex)
-        self.solver.suggestValue(self.min_width, text_ex[0]*2.)
-        self.solver.suggestValue(self.min_height, text_ex[1]*2.)
+        self.solver.suggestValue(self.min_width, text_ex[0])
+        self.solver.suggestValue(self.min_height, text_ex[1])
 
     def place(self):
         txt = self.mpl_text
-        print("Text:",self.name,self.left.value(),self.bottom.value(),self.right.value(),self.top.value())
+        # print("Text being placed",self)
         if txt is not None:
             txt.set_position((self.left.value(),
                               self.bottom.value()))
@@ -242,83 +225,77 @@ class RawAxesContainer(Box):
         super(RawAxesContainer, self).__init__(parent, name)
         self.adjusted_axes_box = Box()
 
-        self.axes = parent.figure.add_axes([0, 0, 0.1, 0.1], label=str(id(self)))
+        # this axis is added at init.  The plotted, and then used to layout.
+        # we need a re-calc step after draw..
+        self.axes = parent.parent.figure.add_axes([0.15, 0.15, 0.45, 0.45], label=str(id(self)))
+        #print('Added Axes')
+        #print(self.axes)
 
     def place(self):
-        print("Place raw axis!")
-        figure = self.parent.figure
-        renderer = self.parent.renderer
+        figure = self.parent.parent.figure
         invTransFig = figure.transFigure.inverted().transform_bbox
-
-        # get the rectangle that solver wants us to have (from Box)
-        # unfortunately, we already know the rectangle size at this point,
-        # so getting the tickbox size is quite difficult.
-
-        print(self)
-        print(*self.get_mpl_rect())
+        # set the axes position based on the info in our box.  Need to
+        # transform into relative co-ordinates.
         box = matplotlib.transforms.Bbox.from_bounds(*self.get_mpl_rect())
-
+        print('Raw axis box',self.name, box)
         bbox = invTransFig(box)
-        print('bbox',bbox)
+        print('Raw axis bbox',self.name, bbox)
+        print('figure extents',figure.canvas.get_width_height())
+
         # This is the rectangle given by out box.left, box.bottom etc.
-
         self.axes.set_position(bbox)
-
-        if 0:
-            tight_bbox = self.axes.get_tightbbox(renderer)
-            tight_bbox = invTransFig(tight_bbox)
-            dx = bbox.xmin-tight_bbox.xmin
-            dx2 = bbox.xmax-tight_bbox.xmax
-            dy = bbox.ymin-tight_bbox.ymin
-            dy2 = bbox.ymax-tight_bbox.ymax
-            new_size = (bbox.x0 + dx, bbox.y0 + dy,
-                        bbox.width - dx + dx2, bbox.height - dy + dy2)
-            print(new_size, self.axes.get_position())
-
-            self.axes.set_position(new_size)
-            #self.adjusted_axes_box.set_geometry(*new_size)
-        #sol.suggestValue(self.adjusted_axes_box.min_width, new_size[2])
 
 class AxesTickContainer(Box):
     def __init__(self, parent, name):
-        super(RawAxesTickContainer, self).__init__(parent, name)
+        super(AxesTickContainer, self).__init__(parent, name)
 
-        self.axes = parent.figure.add_axes([0, 0, 0.1, 0.1], label=str(id(self)))
+        self.raw_axes =  RawAxesContainer(self, name+'ax')
+        self.parent =  parent
+        self.renderer = parent.renderer
 
-    def place(self):
-        print("Place raw axis!")
+        self.solver.suggestValue(self.raw_axes.pref_width, 10000)
+        self.solver.suggestValue(self.raw_axes.pref_height, 10000)
+        self.update_constraints = []
+
+    def update(self):
+        # this only gets called once, but prob should be called numerous times.
+        # ... .but, how do we get rid of old constraints?
+        # We need to get how different the raw_axes bbox is from the position so we know what the offset is
         figure = self.parent.figure
-        renderer = self.parent.renderer
         invTransFig = figure.transFigure.inverted().transform_bbox
 
-        # get the rectangle that solver wants us to have (from Box)
-        # unfortunately, we already know the rectangle size at this point,
-        # so getting the tickbox size is quite difficult.
+        raa = self.raw_axes.axes
+        tight_bbox=raa.get_tightbbox(self.renderer)
+        tight_bbox = invTransFig(tight_bbox)
+        print("Tight box",raa.get_tightbbox(self.renderer))
+        print("Axes box",figure.transFigure.transform_bbox(raa.get_position()))
+        abox = figure.transFigure.transform_bbox(raa.get_position())
+        tbox = raa.get_tightbbox(self.renderer)
 
-        print(self)
-        print(*self.get_mpl_rect())
-        box = matplotlib.transforms.Bbox.from_bounds(*self.get_mpl_rect())
+        dl = (abox.x0-tbox.x0)
+        dr = (tbox.x1-abox.x1)
+        db = (abox.y0-tbox.y0)
+        dt = (tbox.y1-abox.y1)
+        print('Update dl,dr,db,dt',self.name,dl,dr,db,dt)
+        # remove the old constraints if any
+        for c in self.update_constraints:
+            self.solver.removeConstraint(c)
 
-        bbox = invTransFig(box)
-        print('bbox',bbox)
-        # This is the rectangle given by out box.left, box.bottom etc.
+        ## set constraints.
+        self.update_constraints = [self.left +dl  <= self.raw_axes.left,
+                        self.right - dr >= self.raw_axes.right,
+                        self.top   >= self.raw_axes.top+dt,
+                        self.bottom +db <= self.raw_axes.bottom,
+                        self.left >= 0,
+                        self.bottom >= 0]
+        for c in self.update_constraints:
+            self.solver.addConstraint(c)
+        print("Updating AxesTick",self)
 
-        self.axes.set_position(bbox)
-
-        if 0:
-            tight_bbox = self.axes.get_tightbbox(renderer)
-            tight_bbox = invTransFig(tight_bbox)
-            dx = bbox.xmin-tight_bbox.xmin
-            dx2 = bbox.xmax-tight_bbox.xmax
-            dy = bbox.ymin-tight_bbox.ymin
-            dy2 = bbox.ymax-tight_bbox.ymax
-            new_size = (bbox.x0 + dx, bbox.y0 + dy,
-                        bbox.width - dx + dx2, bbox.height - dy + dy2)
-            print(new_size, self.axes.get_position())
-
-            self.axes.set_position(new_size)
-            #self.adjusted_axes_box.set_geometry(*new_size)
-        #sol.suggestValue(self.adjusted_axes_box.min_width, new_size[2])
+    def place(self):
+        print('Axes Container:',self)
+        # in here we need to get a bbox for the axis,
+        self.raw_axes.place()
 
 class AxesContainer(Box):
     def __init__(self, parent, name='ac'):
@@ -330,54 +307,50 @@ class AxesContainer(Box):
         self.renderer = parent.renderer
         self.solver = parent.solver
 
-        self.raw_axes = RawAxesContainer(self, 'ax')
-        self.top_title = TextContainer(self, 'tt')
-        self.left_label = TextContainer(self, 'll')
-        self.right_label = TextContainer(self, 'rl')
-        self.top_label = TextContainer(self, 'tl')
-        self.bottom_label = TextContainer(self,'bl')
-        self.left_ticks = TickContainer(self,'lk')
-        self.bottom_ticks = TickContainer(self,'bk')
+        self.axes_tick = AxesTickContainer(self, name+'at') # contains full plot w/o labels.
+        self.top_title = TextContainer(self, name+'tt')
+        self.left_label = TextContainer(self, name+'ll')
+        self.right_label = TextContainer(self, name+'rl')
+        self.top_label = TextContainer(self, name+'tl')
+        self.bottom_label = TextContainer(self, name+'bl')
         # set up dummy ticklables
-        txt = plt.Text(0, 0, text='0000', transform=None,
-                       va='bottom', ha='left', fontsize=12)
-        self.left_ticks.set_mpl_text(txt)
-        self.bottom_ticks.set_mpl_text(txt)
 
         self.children = [self.top_title, self.top_label, self.bottom_label,
-                         self.left_label, self.right_label, self.raw_axes,
-                         self.left_ticks, self.bottom_ticks]
+                         self.left_label, self.right_label, self.axes_tick]
         self.padding = Variable(name + '_padding')
 
-        self.solver.addEditVariable(self.padding, 'weak')
+        self.solver.addEditVariable(self.padding, 'strong')
         self.solver.suggestValue(self.padding, 10)
 
-        constraints = vstack([self.top_title, self.top_label,
-                              self.raw_axes, self.bottom_ticks, self.bottom_label])
-        constraints += hstack([self.left_label, self.left_ticks, self.raw_axes,  self.right_label])
-
+        constraints = vstacktight([self.top_title, self.top_label,
+                              self.axes_tick, self.bottom_label])
+        constraints += hstack([self.left_label, self.axes_tick,
+                                self.right_label])
         #constraints += [self.left_label.right  <= self.raw_axes.left]
 
         pad = self.padding
         constraints += [self.left + pad   <= self.left_label.left,
                         self.right - pad >= self.right_label.right,
-                        self.top - pad >= self.top_title.top,
+                        self.top_title.top + pad <= self.top,
                         self.bottom + pad <= self.bottom_label.bottom,
                         self.left >= 0,
                         self.bottom >= 0]
 
         if 1:
             constraints += align([self.top_title, self.top_label,
-                                  self.raw_axes, self.bottom_label], 'h_center')
-            constraints += align([self.left_label, self.raw_axes,
+                                  self.axes_tick, self.bottom_label], 'h_center')
+            constraints += align([self.left_label, self.axes_tick,
                                   self.right_label], 'v_center')
 
         for c in constraints:
+            print(c)
             self.solver.addConstraint(c)
         # these end up setting the maximum size of the axis.  Not sure why we
         # want this to be that way, so set to big numbers.
-        self.solver.suggestValue(self.raw_axes.pref_width, 100000)
-        self.solver.suggestValue(self.raw_axes.pref_height, 100000)
+        #        self.solver.suggestValue(self.axes_tick.raw_axes.pref_width, 100000)
+        #        self.solver.suggestValue(self.axes_tick.raw_axes.pref_height, 100000)
+        self.solver.suggestValue(self.axes_tick.pref_width, 100000)
+        self.solver.suggestValue(self.axes_tick.pref_height, 100000)
         self.solver.updateVariables()
 
     def add_label(self, text, where='bottom'):
@@ -406,13 +379,15 @@ class AxesContainer(Box):
 
 
     def do_layout(self):
-        self.solver.updateVariables()
         print("Do Layout")
         print(self)
         print(self.left_label)
-        print(self.raw_axes)
+        print(self.axes_tick.raw_axes)
+        print(self.axes_tick)
         print(self.right_label)
         print("Do Layout")
+        self.axes_tick.update()
+        self.solver.updateVariables()
 
         for c in self.children:
             c.place()
@@ -454,48 +429,71 @@ if __name__ == '__main__':
     ax.grid('on')
     print(fig2.canvas.get_width_height())
     fl = FigureLayout(fig2)
-    ac1 = AxesContainer(fl)
-    ac2 = AxesContainer(fl)
-    ac3 = AxesContainer(fl)
+    ac1 = AxesContainer(fl,name='ac1')
+    ac2 = AxesContainer(fl,name='ac2')
+    ac3 = AxesContainer(fl,name='ac3')
     gl = GridLayout(2, 2, fig2.bbox.width, fig2.bbox.height)
 
     #fl.solver.addConstraint(ac1.top_label.v_center == ac2.top_label.v_center)
-    #fl.solver.addConstraint(ac1.raw_axes.right == ac3.raw_axes.right)
+    if 0:
+        fl.solver.addConstraint(ac1.axes_tick.raw_axes.right ==
+            ac3.axes_tick.raw_axes.right)
+        fl.solver.addConstraint(ac1.axes_tick.raw_axes.left ==
+            ac3.axes_tick.raw_axes.left)
     #fl.solver.addConstraint(ac1.raw_axes.left == ac3.raw_axes.left)
     #fl.solver.addConstraint(ac1.left_label.right == ac3.left_label.right)
 
-    fl.solver.addConstraint(ac1.raw_axes.height == ac3.raw_axes.height)
-    fl.solver.addConstraint(ac2.raw_axes.width == ac3.raw_axes.width)
-    fl.solver.addConstraint(ac2.raw_axes.bottom == ac3.raw_axes.bottom)
-    fl.solver.addConstraint(ac2.raw_axes.top == ac1.raw_axes.top)
+    if 1:
+        fl.solver.addConstraint(ac1.axes_tick.raw_axes.height ==
+                            ac3.axes_tick.raw_axes.height)
+        fl.solver.addConstraint(ac1.axes_tick.raw_axes.left ==
+                            ac3.axes_tick.raw_axes.left)
+        fl.solver.addConstraint(ac1.axes_tick.raw_axes.right ==
+                                                ac3.axes_tick.raw_axes.right)
+    if 1:
+        fl.solver.addConstraint(ac2.axes_tick.raw_axes.width ==
+                            ac3.axes_tick.raw_axes.width)
+    if 1:
+        # contraint to align bottom and tops...
+        fl.solver.addConstraint(ac2.axes_tick.raw_axes.bottom ==
+                        ac3.axes_tick.raw_axes.bottom)
+        fl.solver.addConstraint(ac2.axes_tick.raw_axes.top ==
+                        ac1.axes_tick.raw_axes.top)
+    #fl.solver.addConstraint(ac2.raw_axes.top == ac1.raw_axes.top)
     # ac.add_label('title', 'title')
-    ac1.add_label('hallo', 'top')
-    ac1.add_label('Abo', 'left')
-    ac1.add_label('Abo', 'bottom')
+    #ac1.add_label('hallo', 'top')
+    ac1.add_label('Abo\nYay', 'left')
+    ac1.add_label('Abo', 'top')
     ac1.add_label('title1', 'title')
 
-    ac2.add_label('sda', 'top')
-    ac2.add_label('title2', 'title')
-    ac2.add_label('left', 'left')
+    if 1:
+        ac2.add_label('sda\n ha ha h', 'bottom')
+        ac2.add_label('title2', 'title')
+        ac2.add_label('right', 'right')
 
-    ac3.add_label('title3', 'title')
-    ac3.add_label('Wavenumbers / [cm]', 'left')
-    ac3.add_label('Ac3 bottom label', 'bottom')
+        ac2.axes_tick.raw_axes.axes.plot(np.arange(0,10000,1000),
+            np.arange(0,10000,1000))
 
-    ac1.raw_axes.axes.xaxis.set_ticks_position('top')
-    ac1.raw_axes.axes.plot([1000, 50000, 100000, 1000000])
+        ac3.add_label('title3', 'title')
+        ac3.add_label('Wavenumbers / [cm]', 'left')
+        ac3.add_label('Ac3 bottom label', 'bottom')
 
-    ac2.raw_axes.axes.plot([1000, 50000, 100000, 1000000],[1000, 50000, 100000, 1000000])
+    ac1.axes_tick.raw_axes.axes.xaxis.set_ticks_position('top')
+    ac2.axes_tick.raw_axes.axes.yaxis.set_ticks_position('right')
+    ac1.axes_tick.raw_axes.axes.plot([1000, 3000, 6000, 7000])
+
     def do_lay(ev):
         print('Resize geom',fig2.canvas.get_width_height())
         gl.calc_borders(fig2.bbox.width, fig2.bbox.height)
         gl.place_rect(ac1, (0, 0))
         gl.place_rect(ac2, (0, 1), rowspan=2)
         gl.place_rect(ac3, (1, 0))
-        for a in [ac1, ac2, ac3]:
+        for a in [ac1  , ac2, ac3]:
             a.do_layout()
+            # print(fl.solver.dump())
 
     do_lay(None)
+    #do_lay(None)
     cid = fig2.canvas.mpl_connect('resize_event', do_lay)
 
     # print(ac)
