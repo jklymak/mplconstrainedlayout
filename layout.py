@@ -318,27 +318,25 @@ class AxesContainer(Box):
         self.solver = parent.solver
 
         self.axes_tick = AxesTickContainer(self, name+'at') # contains full plot w/o labels.
-        self.top_space = SpaceContainer(self,name+'ts')
         self.top_title = TextContainer(self, name+'tt')
         self.left_label = TextContainer(self, name+'ll')
         self.right_label = TextContainer(self, name+'rl')
         self.top_label = TextContainer(self, name+'tl')
         self.bottom_label = TextContainer(self, name+'bl')
-        self.bottom_space = SpaceContainer(self,name+'bs')
         # set up dummy ticklables
 
         self.children = [self.top_title, self.top_label, self.bottom_label,
                          self.left_label, self.right_label, self.axes_tick,
-                         self.top_space, self.bottom_space]
+                         ]
         self.padding = Variable(name + '_padding')
 
         self.solver.addEditVariable(self.padding, 'strong')
         self.solver.suggestValue(self.padding, 10)
 
-        constraints = vstacktight([self.top_space, self.top_title,
+        constraints = vstacktight([ self.top_title,
                                 self.top_label,
-                              self.axes_tick, self.bottom_label,
-                              self.bottom_space], padding=10)
+                              self.axes_tick, self.bottom_label],
+                              padding=10)
         constraints += hstack([self.left_label, self.axes_tick,
                                 self.right_label], padding=10)
         for c in constraints:
@@ -349,10 +347,8 @@ class AxesContainer(Box):
         pad = self.padding
         constraints = [self.left + pad   <= self.left_label.left,
                         self.right - pad >= self.right_label.right,
-                        self.top_space.top + pad <= self.top,
-                        self.top_space.bottom >= self.top_title.top,
-                        self.bottom + pad <= self.bottom_space.bottom,
-                        self.bottom_space.top <= self.bottom_label.bottom,
+                        self.top_title.top + pad <= self.top,
+                        self.bottom + pad <= self.bottom_label.bottom,
                         self.left >= 0,
                         self.bottom >= 0]
 
@@ -476,10 +472,10 @@ if __name__ == '__main__':
                             ac3.axes_tick.raw_axes.left)
         fl.solver.addConstraint(ac1.axes_tick.raw_axes.right ==
                                                 ac3.axes_tick.raw_axes.right)
-    if 1:
+    if 0:
         fl.solver.addConstraint(ac2.axes_tick.raw_axes.width ==
                             ac3.axes_tick.raw_axes.width)
-    if 1:
+    if 0:
         # contraint to align bottom and tops...
         fl.solver.addConstraint(ac2.axes_tick.raw_axes.bottom ==
                         ac3.axes_tick.raw_axes.bottom)
@@ -501,12 +497,12 @@ if __name__ == '__main__':
             np.arange(0,10000,1000))
 
         ac3.add_label('title3', 'title')
-        ac3.add_label('Wavenumbers / [cm]', 'right')
+        ac3.add_label('Wavenumbers / [cm]', 'left')
         ac3.add_label('Ac3 bottom label', 'bottom')
 
     ac1.axes_tick.raw_axes.axes.xaxis.set_ticks_position('bottom')
     ac2.axes_tick.raw_axes.axes.yaxis.set_ticks_position('right')
-    ac3.axes_tick.raw_axes.axes.yaxis.set_ticks_position('right')
+    ac3.axes_tick.raw_axes.axes.yaxis.set_ticks_position('left')
     ac1.axes_tick.raw_axes.axes.plot([1000, 3000, 6000, 7000])
 
     def do_lay(ev):
@@ -520,8 +516,9 @@ if __name__ == '__main__':
             # print(fl.solver.dump())
 
     do_lay(None)
-    #do_lay(None)
+    do_lay(None)
     cid = fig2.canvas.mpl_connect('resize_event', do_lay)
 
     # print(ac)
     plt.show()
+    fig2.savefig('Example.png')
