@@ -18,4 +18,4 @@ Status: its pretty messy, but does what I want.  Todo: clean up methods, and com
 
 Long term, turn into a MEP
 
-<img width="645" alt="example" src="https://user-images.githubusercontent.com/1562854/28897939-03043d40-7798-11e7-8925-a7fbcca004a6.png">
+<img width="645" alt="example" src="https://github.com/jklymak/mplconstrainedlayout/blob/master/Example.png?raw=true">
