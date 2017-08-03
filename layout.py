@@ -5,7 +5,7 @@
 from __future__ import division, print_function
 import kiwisolver as kiwi
 import matplotlib
-matplotlib.use('Qt5Agg')
+matplotlib.use('qt5agg')
 from matplotlib import pyplot as plt
 
 Variable = kiwi.Variable
@@ -188,6 +188,16 @@ def get_text_size(mpl_txt, renderer):
     bbox = mpl_txt.get_window_extent(renderer)
     return bbox.width, bbox.height
 
+class SpaceContainer(Box):
+    def __init__(self, parent, name):
+        # parent is the axis usually
+        super(SpaceContainer, self).__init__(parent, name)
+        self.solver.suggestValue(self.pref_width, 100.)
+        self.solver.suggestValue(self.pref_height, 100.)
+
+    def place(self):
+        print("Space!", self)
+
 class TextContainer(Box):
     def __init__(self, parent, name):
         # parent is the axis usually
@@ -200,13 +210,13 @@ class TextContainer(Box):
         txt.set_figure(self.parent.figure)
         self.parent.figure.texts.append(txt)
         text_ex = get_text_size(txt, self.parent.renderer)
-        print("Text_ex",text_ex)
+        print("Text_ex",self,text_ex)
         self.solver.suggestValue(self.min_width, text_ex[0])
         self.solver.suggestValue(self.min_height, text_ex[1])
 
     def place(self):
         txt = self.mpl_text
-        # print("Text being placed",self)
+        print("Text being placed",self)
         if txt is not None:
             txt.set_position((self.left.value(),
                               self.bottom.value()))
@@ -282,10 +292,10 @@ class AxesTickContainer(Box):
             self.solver.removeConstraint(c)
 
         ## set constraints.
-        self.update_constraints = [self.left +dl  <= self.raw_axes.left,
-                        self.right - dr >= self.raw_axes.right,
-                        self.top   >= self.raw_axes.top+dt,
-                        self.bottom +db <= self.raw_axes.bottom,
+        self.update_constraints = [self.left +dl  == self.raw_axes.left,
+                        self.right - dr == self.raw_axes.right,
+                        self.top   == self.raw_axes.top+dt,
+                        self.bottom +db == self.raw_axes.bottom,
                         self.left >= 0,
                         self.bottom >= 0]
         for c in self.update_constraints:
@@ -308,43 +318,58 @@ class AxesContainer(Box):
         self.solver = parent.solver
 
         self.axes_tick = AxesTickContainer(self, name+'at') # contains full plot w/o labels.
+        self.top_space = SpaceContainer(self,name+'ts')
         self.top_title = TextContainer(self, name+'tt')
         self.left_label = TextContainer(self, name+'ll')
         self.right_label = TextContainer(self, name+'rl')
         self.top_label = TextContainer(self, name+'tl')
         self.bottom_label = TextContainer(self, name+'bl')
+        self.bottom_space = SpaceContainer(self,name+'bs')
         # set up dummy ticklables
 
         self.children = [self.top_title, self.top_label, self.bottom_label,
-                         self.left_label, self.right_label, self.axes_tick]
+                         self.left_label, self.right_label, self.axes_tick,
+                         self.top_space, self.bottom_space]
         self.padding = Variable(name + '_padding')
 
         self.solver.addEditVariable(self.padding, 'strong')
         self.solver.suggestValue(self.padding, 10)
 
-        constraints = vstacktight([self.top_title, self.top_label,
-                              self.axes_tick, self.bottom_label])
+        constraints = vstacktight([self.top_space, self.top_title,
+                                self.top_label,
+                              self.axes_tick, self.bottom_label,
+                              self.bottom_space], padding=10)
         constraints += hstack([self.left_label, self.axes_tick,
-                                self.right_label])
+                                self.right_label], padding=10)
+        for c in constraints:
+            print(c)
+            self.solver.addConstraint(c)
         #constraints += [self.left_label.right  <= self.raw_axes.left]
 
         pad = self.padding
-        constraints += [self.left + pad   <= self.left_label.left,
+        constraints = [self.left + pad   <= self.left_label.left,
                         self.right - pad >= self.right_label.right,
-                        self.top_title.top + pad <= self.top,
-                        self.bottom + pad <= self.bottom_label.bottom,
+                        self.top_space.top + pad <= self.top,
+                        self.top_space.bottom >= self.top_title.top,
+                        self.bottom + pad <= self.bottom_space.bottom,
+                        self.bottom_space.top <= self.bottom_label.bottom,
                         self.left >= 0,
                         self.bottom >= 0]
 
         if 1:
             constraints += align([self.top_title, self.top_label,
-                                  self.axes_tick, self.bottom_label], 'h_center')
-            constraints += align([self.left_label, self.axes_tick,
+                                  self.axes_tick.raw_axes, self.bottom_label], 'h_center')
+            constraints += align([self.left_label, self.axes_tick.raw_axes,
                                   self.right_label], 'v_center')
 
         for c in constraints:
             print(c)
-            self.solver.addConstraint(c)
+            self.solver.addConstraint((c|1e5))
+
+        self.solver.addConstraint((self.top_title.bottom == self.top_label.top))
+        self.solver.addConstraint((self.bottom_label.top ==
+                    self.axes_tick.bottom))
+
         # these end up setting the maximum size of the axis.  Not sure why we
         # want this to be that way, so set to big numbers.
         #        self.solver.suggestValue(self.axes_tick.raw_axes.pref_width, 100000)
@@ -384,6 +409,7 @@ class AxesContainer(Box):
         print(self.left_label)
         print(self.axes_tick.raw_axes)
         print(self.axes_tick)
+        print(self.bottom_label)
         print(self.right_label)
         print("Do Layout")
         self.axes_tick.update()
@@ -435,7 +461,7 @@ if __name__ == '__main__':
     gl = GridLayout(2, 2, fig2.bbox.width, fig2.bbox.height)
 
     #fl.solver.addConstraint(ac1.top_label.v_center == ac2.top_label.v_center)
-    if 0:
+    if 1:
         fl.solver.addConstraint(ac1.axes_tick.raw_axes.right ==
             ac3.axes_tick.raw_axes.right)
         fl.solver.addConstraint(ac1.axes_tick.raw_axes.left ==
@@ -463,7 +489,7 @@ if __name__ == '__main__':
     # ac.add_label('title', 'title')
     #ac1.add_label('hallo', 'top')
     ac1.add_label('Abo\nYay', 'left')
-    ac1.add_label('Abo', 'top')
+    ac1.add_label('Abo', 'bottom')
     ac1.add_label('title1', 'title')
 
     if 1:
@@ -475,11 +501,12 @@ if __name__ == '__main__':
             np.arange(0,10000,1000))
 
         ac3.add_label('title3', 'title')
-        ac3.add_label('Wavenumbers / [cm]', 'left')
+        ac3.add_label('Wavenumbers / [cm]', 'right')
         ac3.add_label('Ac3 bottom label', 'bottom')
 
-    ac1.axes_tick.raw_axes.axes.xaxis.set_ticks_position('top')
+    ac1.axes_tick.raw_axes.axes.xaxis.set_ticks_position('bottom')
     ac2.axes_tick.raw_axes.axes.yaxis.set_ticks_position('right')
+    ac3.axes_tick.raw_axes.axes.yaxis.set_ticks_position('right')
     ac1.axes_tick.raw_axes.axes.plot([1000, 3000, 6000, 7000])
 
     def do_lay(ev):
