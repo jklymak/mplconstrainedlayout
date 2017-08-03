@@ -238,14 +238,25 @@ class RawAxesContainer(Box):
         # this axis is added at init.  The plotted, and then used to layout.
         # we need a re-calc step after draw..
         self.axes = parent.parent.figure.add_axes([0.15, 0.15, 0.45, 0.45], label=str(id(self)))
+        # constrain to be inside parent?
+        constraints = [self.left  >= self.parent.left,
+                        self.right <= self.parent.right,
+                        self.top   <= self.parent.top,
+                        self.bottom >= self.parent.bottom]
+        for c in constraints:
+            self.solver.addConstraint(c)
         #print('Added Axes')
         #print(self.axes)
 
     def place(self):
+        print("Placing: ")
+        #        print (self.solver.dump())
         figure = self.parent.parent.figure
         invTransFig = figure.transFigure.inverted().transform_bbox
         # set the axes position based on the info in our box.  Need to
         # transform into relative co-ordinates.
+        print(self)
+        print(self.width.value())
         box = matplotlib.transforms.Bbox.from_bounds(*self.get_mpl_rect())
         print('Raw axis box',self.name, box)
         bbox = invTransFig(box)
@@ -345,15 +356,31 @@ class AxesContainer(Box):
         #constraints += [self.left_label.right  <= self.raw_axes.left]
 
         pad = self.padding
-        constraints = [self.left + pad   <= self.left_label.left,
+        # need to save these because we want to remove them and redo them
+        # if we add another box in some direction.
+        self.outer_left = self.left_label
+        self.outer_right = self.right_label
+        self.outer_bottom = self.bottom_label
+        self.outer_top = self.top_title
+        if 0:
+            self.outer_constraints = [self.left + pad   <= self.left_label.left,
                         self.right - pad >= self.right_label.right,
                         self.top_title.top + pad <= self.top,
                         self.bottom + pad <= self.bottom_label.bottom,
                         self.left >= 0,
                         self.bottom >= 0]
+        self.outer_constraints = [self.left + pad   <= self.outer_left.left,
+                        self.right - pad >= self.outer_right.right,
+                        self.outer_top.top + pad <= self.top,
+                        self.bottom + pad <= self.outer_bottom.bottom,
+                        self.left >= 0,
+                        self.bottom >= 0]
+        for c in self.outer_constraints:
+            print(c)
+            self.solver.addConstraint((c|1e5))
 
         if 1:
-            constraints += align([self.top_title, self.top_label,
+            constraints = align([self.top_title, self.top_label,
                                   self.axes_tick.raw_axes, self.bottom_label], 'h_center')
             constraints += align([self.left_label, self.axes_tick.raw_axes,
                                   self.right_label], 'v_center')
@@ -373,6 +400,38 @@ class AxesContainer(Box):
         self.solver.suggestValue(self.axes_tick.pref_width, 100000)
         self.solver.suggestValue(self.axes_tick.pref_height, 100000)
         self.solver.updateVariables()
+
+    def append_right(self, box):
+        print(type(self.children[-1]))
+        print(type(box))
+        self.children += [box]
+        # constraints on the leftside of box.
+        constraints = hstack([self.outer_right, box])
+        constraints += align([self.outer_right, box],'v_center')
+        for c in constraints:
+            print(c)
+            self.solver.addConstraint((c|1e5))
+        # now box is the outer right
+        self.outer_right = box
+
+        # remove the old outer constraints....
+        for c in self.outer_constraints:
+            try:
+                self.solver.removeConstraint(c)
+            except:
+                print('failed to remove',c)
+        # redo the outer constraints.
+        pad = 10.
+        self.outer_constraints = [self.left + pad   <= self.outer_left.left,
+                        self.right - pad >= self.outer_right.right,
+                        self.outer_top.top + pad <= self.top,
+                        self.bottom + pad <= self.outer_bottom.bottom,
+                        self.left >= 0,
+                        self.bottom >= 0]
+        for c in self.outer_constraints:
+            print(c)
+            self.solver.addConstraint((c|1e5))
+
 
     def add_label(self, text, where='bottom'):
         d = {'left': self.left_label,
@@ -412,7 +471,12 @@ class AxesContainer(Box):
         self.solver.updateVariables()
 
         for c in self.children:
-            c.place()
+            # children can either be AxesContainer (parasitic axis usually)
+            # or children can be objects with a place method.
+            if isinstance(c,AxesContainer):
+                c.do_layout()
+            else:
+                c.place()
 
 
 def find_renderer(fig):
@@ -454,6 +518,17 @@ if __name__ == '__main__':
     ac1 = AxesContainer(fl,name='ac1')
     ac2 = AxesContainer(fl,name='ac2')
     ac3 = AxesContainer(fl,name='ac3')
+    print(ac3.width)
+    # make a colorbar for ac3 only...
+    cb3 = AxesContainer(fl,name='cb3')
+    # set the size of the actual colorbar inside this axis...
+    fl.solver.addConstraint(cb3.axes_tick.raw_axes.width ==
+            0.03*ac3.axes_tick.width)
+    fl.solver.addConstraint(cb3.axes_tick.raw_axes.height ==
+            0.6*ac3.axes_tick.raw_axes.height)
+    # append this axis to the right of ac3:
+    ac3.append_right(cb3)
+
     gl = GridLayout(2, 2, fig2.bbox.width, fig2.bbox.height)
 
     #fl.solver.addConstraint(ac1.top_label.v_center == ac2.top_label.v_center)
@@ -505,20 +580,29 @@ if __name__ == '__main__':
     ac3.axes_tick.raw_axes.axes.yaxis.set_ticks_position('left')
     ac1.axes_tick.raw_axes.axes.plot([1000, 3000, 6000, 7000])
 
+    pcm = ac3.axes_tick.raw_axes.axes.pcolormesh(np.random.rand(20,20)*500)
+    fig2.colorbar(pcm,cax=cb3.axes_tick.raw_axes.axes)
+    cb3.axes_tick.raw_axes.height
+    fl.solver.addConstraint(cb3.axes_tick.raw_axes.height <=
+                    0.6*ac3.axes_tick.raw_axes.height)
     def do_lay(ev):
         print('Resize geom',fig2.canvas.get_width_height())
         gl.calc_borders(fig2.bbox.width, fig2.bbox.height)
         gl.place_rect(ac1, (0, 0))
         gl.place_rect(ac2, (0, 1), rowspan=2)
         gl.place_rect(ac3, (1, 0))
-        for a in [ac1  , ac2, ac3]:
+        for a in [ac1, ac2, ac3]:
+            print(a)
             a.do_layout()
             # print(fl.solver.dump())
 
-    do_lay(None)
     do_lay(None)
     cid = fig2.canvas.mpl_connect('resize_event', do_lay)
 
     # print(ac)
     plt.show()
-    fig2.savefig('Example.png')
+    #print('Starting Print')
+    #matplotlib.use('PDF',warn=False, force=True)
+    #import matplotlib.pyplot as plt
+    do_lay(None)
+    #fig2.savefig('Example.png')
