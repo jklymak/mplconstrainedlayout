@@ -192,8 +192,8 @@ class SpaceContainer(Box):
     def __init__(self, parent, name):
         # parent is the axis usually
         super(SpaceContainer, self).__init__(parent, name)
-        self.solver.suggestValue(self.pref_width, 100.)
-        self.solver.suggestValue(self.pref_height, 100.)
+        self.solver.suggestValue(self.pref_width, 1.)
+        self.solver.suggestValue(self.pref_height, 1.)
 
     def place(self):
         print("Space!", self)
@@ -203,16 +203,20 @@ class TextContainer(Box):
         # parent is the axis usually
         super(TextContainer, self).__init__(parent, name)
         self.mpl_text = None
+        self.figure = parent.figure
 
     def set_mpl_text(self, txt):
         print("TXT:",txt)
         self.mpl_text = txt
         txt.set_figure(self.parent.figure)
         self.parent.figure.texts.append(txt)
-        text_ex = get_text_size(txt, self.parent.renderer)
-        print("Text_ex",self,text_ex)
-        self.solver.suggestValue(self.min_width, text_ex[0])
-        self.solver.suggestValue(self.min_height, text_ex[1])
+        renderer = self.figure.canvas.get_renderer()
+        bbox = self.figure.transFigure.inverted().transform_bbox(
+            txt.get_window_extent(renderer))
+
+        print("Text_ex",self,bbox)
+        self.solver.suggestValue(self.min_width, bbox.width)
+        self.solver.suggestValue(self.min_height, bbox.height)
 
     def place(self):
         txt = self.mpl_text
@@ -264,7 +268,7 @@ class RawAxesContainer(Box):
         print('figure extents',figure.canvas.get_width_height())
 
         # This is the rectangle given by out box.left, box.bottom etc.
-        self.axes.set_position(bbox)
+        self.axes.set_position(box)
 
 class AxesTickContainer(Box):
     def __init__(self, parent, name):
@@ -274,8 +278,8 @@ class AxesTickContainer(Box):
         self.parent =  parent
         self.renderer = parent.renderer
 
-        self.solver.suggestValue(self.raw_axes.pref_width, 10000)
-        self.solver.suggestValue(self.raw_axes.pref_height, 10000)
+        self.solver.suggestValue(self.raw_axes.pref_width, 1.)
+        self.solver.suggestValue(self.raw_axes.pref_height, 1.)
         self.update_constraints = []
 
     def update(self):
@@ -286,12 +290,12 @@ class AxesTickContainer(Box):
         invTransFig = figure.transFigure.inverted().transform_bbox
 
         raa = self.raw_axes.axes
-        tight_bbox=raa.get_tightbbox(self.renderer)
-        tight_bbox = invTransFig(tight_bbox)
-        print("Tight box",raa.get_tightbbox(self.renderer))
-        print("Axes box",figure.transFigure.transform_bbox(raa.get_position()))
-        abox = figure.transFigure.transform_bbox(raa.get_position())
-        tbox = raa.get_tightbbox(self.renderer)
+        abox = raa.get_position()
+        tbox = invTransFig(raa.get_tightbbox(self.renderer))
+        print('abox')
+        print(abox)
+        print('tbox')
+        print(tbox)
 
         dl = (abox.x0-tbox.x0)
         dr = (tbox.x1-abox.x1)
@@ -342,14 +346,14 @@ class AxesContainer(Box):
         self.padding = Variable(name + '_padding')
 
         self.solver.addEditVariable(self.padding, 'strong')
-        self.solver.suggestValue(self.padding, 10)
+        self.solver.suggestValue(self.padding, 0.005)
 
         constraints = vstacktight([ self.top_title,
                                 self.top_label,
                               self.axes_tick, self.bottom_label],
-                              padding=10)
+                              padding=0.005)
         constraints += hstack([self.left_label, self.axes_tick,
-                                self.right_label], padding=10)
+                                self.right_label], padding=0.005)
         for c in constraints:
             print(c)
             self.solver.addConstraint(c)
@@ -397,8 +401,8 @@ class AxesContainer(Box):
         # want this to be that way, so set to big numbers.
         #        self.solver.suggestValue(self.axes_tick.raw_axes.pref_width, 100000)
         #        self.solver.suggestValue(self.axes_tick.raw_axes.pref_height, 100000)
-        self.solver.suggestValue(self.axes_tick.pref_width, 100000)
-        self.solver.suggestValue(self.axes_tick.pref_height, 100000)
+        self.solver.suggestValue(self.axes_tick.pref_width, 1.)
+        self.solver.suggestValue(self.axes_tick.pref_height, 1.00000)
         self.solver.updateVariables()
 
     def append_right(self, box):
@@ -406,7 +410,8 @@ class AxesContainer(Box):
         print(type(box))
         self.children += [box]
         # constraints on the leftside of box.
-        constraints = hstack([self.outer_right, box])
+        # constraints = hstack([self.outer_right, box])
+        constraints = [self.outer_right.right == box.left]
         constraints += align([self.outer_right, box],'v_center')
         for c in constraints:
             print(c)
@@ -421,7 +426,7 @@ class AxesContainer(Box):
             except:
                 print('failed to remove',c)
         # redo the outer constraints.
-        pad = 10.
+        pad = 0.00
         self.outer_constraints = [self.left + pad   <= self.outer_left.left,
                         self.right - pad >= self.outer_right.right,
                         self.outer_top.top + pad <= self.top,
@@ -448,11 +453,13 @@ class AxesContainer(Box):
 
         if where in ('left', 'right'):
             rotation = 'vertical'
-            txt = plt.Text(0, 0, text=text, transform=None, rotation=rotation,
+            txt = plt.Text(0, 0, text=text, transform=self.figure.transFigure,
+                            rotation=rotation,
                            va='bottom', ha='left', fontsize=fs)
         else:
             rotation = 'horizontal'
-            txt = plt.Text(0, 0, text=text, transform=None, rotation=rotation,
+            txt = plt.Text(0, 0, text=text, transform=self.figure.transFigure,
+                           rotation=rotation,
                            va='bottom', ha='left', fontsize=fs)
 
         r.set_mpl_text(txt)
@@ -495,7 +502,7 @@ class FigureLayout(Box):
         self.children = []
         self.figure = mpl_figure
         self.renderer = find_renderer(mpl_figure)
-        self.set_geometry(0, 0, mpl_figure.bbox.width, mpl_figure.bbox.height)
+        self.set_geometry(0, 0, 1.,1.)
         self.parent = None
 
     def grid_layout(self, size, hspace=0.1):
@@ -520,14 +527,17 @@ if __name__ == '__main__':
     ac3 = AxesContainer(fl,name='ac3')
     print(ac3.width)
     # make a colorbar for ac3 only...
-    cb3 = AxesContainer(fl,name='cb3')
-    # set the size of the actual colorbar inside this axis...
-    fl.solver.addConstraint(cb3.axes_tick.raw_axes.width ==
-            0.03*ac3.axes_tick.width)
-    fl.solver.addConstraint(cb3.axes_tick.raw_axes.height ==
-            0.6*ac3.axes_tick.raw_axes.height)
-    # append this axis to the right of ac3:
-    ac3.append_right(cb3)
+    if 1:
+        cb3 = AxesContainer(fl,name='cb3')
+        # set the size of the actual colorbar inside this axis...
+        fl.solver.addConstraint(cb3.axes_tick.raw_axes.width ==
+                0.03*ac3.axes_tick.width)
+        fl.solver.addConstraint(cb3.axes_tick.raw_axes.height ==
+                0.6*ac3.axes_tick.raw_axes.height)
+        # append this axis to the right of ac3:
+        ac3.append_right(cb3)
+        print(fl.solver.dump())
+    #print(boo)
 
     gl = GridLayout(2, 2, fig2.bbox.width, fig2.bbox.height)
 
@@ -582,12 +592,9 @@ if __name__ == '__main__':
 
     pcm = ac3.axes_tick.raw_axes.axes.pcolormesh(np.random.rand(20,20)*500)
     fig2.colorbar(pcm,cax=cb3.axes_tick.raw_axes.axes)
-    cb3.axes_tick.raw_axes.height
-    fl.solver.addConstraint(cb3.axes_tick.raw_axes.height <=
-                    0.6*ac3.axes_tick.raw_axes.height)
     def do_lay(ev):
         print('Resize geom',fig2.canvas.get_width_height())
-        gl.calc_borders(fig2.bbox.width, fig2.bbox.height)
+        gl.calc_borders(1.,1.)
         gl.place_rect(ac1, (0, 0))
         gl.place_rect(ac2, (0, 1), rowspan=2)
         gl.place_rect(ac3, (1, 0))
@@ -605,4 +612,4 @@ if __name__ == '__main__':
     #matplotlib.use('PDF',warn=False, force=True)
     #import matplotlib.pyplot as plt
     do_lay(None)
-    #fig2.savefig('Example.png')
+    fig2.savefig('Example.png')
