@@ -529,9 +529,12 @@ if __name__ == '__main__':
     # make a colorbar for ac3 only...
     if 1:
         cb3 = AxesContainer(fl,name='cb3')
+        # make tight
+        cb3.solver.suggestValue(cb3.pref_width, 0.)
+        cb3.solver.suggestValue(cb3.pref_height, 0.)
         # set the size of the actual colorbar inside this axis...
         fl.solver.addConstraint(cb3.axes_tick.raw_axes.width ==
-                0.03*ac3.axes_tick.width)
+                1./fig2.get_size_inches()[0])
         fl.solver.addConstraint(cb3.axes_tick.raw_axes.height ==
                 0.6*ac3.axes_tick.raw_axes.height)
         # append this axis to the right of ac3:
