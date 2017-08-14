@@ -6,6 +6,7 @@ from __future__ import division, print_function
 import kiwisolver as kiwi
 import numpy as np
 import matplotlib.gridspec as gridspec
+import matplotlib
 
 
 
@@ -268,7 +269,6 @@ class LayoutBox(object):
         figLefts = [left + cellWs[2*colNum] for colNum in range(ncols)]
         figRights = [left + cellWs[2*colNum+1] for colNum in range(ncols)]
 
-        print(figRights)
         rowNum, colNum =  divmod(subspec.num1, ncols)
         figBottom = figBottoms[rowNum]
         figTop = figTops[rowNum]
@@ -292,9 +292,6 @@ class LayoutBox(object):
 
         width = figRight - figLeft
         height = figTop - figBottom
-        print(width)
-        #print("LAYOUT:",figLeft, figBottom, width,height)
-        print(self.width.value() * width)
 
         eps = 0.001
         cs = [lb.left   == self.left  + self.width * figLeft,
@@ -305,6 +302,82 @@ class LayoutBox(object):
             self.solver.addConstraint((c | 'strong'))
 
         return lb
+
+
+    def layout_axis_right(self, ax, shrink=0.6, padding=None, toppad=0, bottompad=0, leftpad=0, rightpad=0):
+        '''
+        return cblb, cbspinelb
+
+        Layout ax to the right of this layout box.
+        '''
+        if padding:
+            toppad = padding
+            bottompad = padding
+            leftpad = padding
+            rightpad = padding
+        cblb = LayoutBox(parent=self.parent, name=self.parent.name+'.cblb', artist=ax)
+        # this is the location for the colorbar spine
+        cbspinelb = LayoutBox(parent=cblb, name=cblb.name+'.cbspinelb', spine=True)
+        c = (self.right  <= cblb.left)
+        self.solver.addConstraint(c | 'required')
+        # hstack([self,cblb], padding=0.)
+
+        cbspinelb.set_height(self.height*shrink)
+        align([self,cbspinelb],'v_center')
+
+        fig = ax.get_figure()
+        renderer = fig.canvas.get_renderer()
+        pos = ax.get_position()
+        invTransFig = fig.transFigure.inverted().transform_bbox
+        bbox = invTransFig(ax.get_tightbbox(renderer=renderer))
+
+        # set the width of the parent box.
+        cblb.set_width(bbox.x1-bbox.x0)
+        c = (cblb.width  == bbox.x1-bbox.x0)
+        self.solver.addConstraint(c | 'strong')
+
+        cbspinelb.set_left_margin_min(-bbox.x0+pos.x0+leftpad)
+        cbspinelb.set_right_margin_min(bbox.x1-pos.x1+rightpad)
+        cbspinelb.set_bottom_margin_min(-bbox.y0+pos.y0+bottompad)
+        cbspinelb.set_top_margin_min(bbox.y1-pos.y1+toppad)
+
+        return cblb, cbspinelb
+
+
+    def layout_axis_subplotspec(self, subspec, name='', ax=None, pad=None, toppad=0, bottompad=0, leftpad=0, rightpad=0):
+        if pad:
+            toppad = pad
+            bottompad = pad
+            leftpad = pad
+            rightpad = pad
+        sslb = self.layout_from_subplotspec(subspec,
+                name=self.name+'.'+name+'.sslb', artist=subspec)
+        # this is th contaier for the axis itself
+        axlb = LayoutBox(parent=sslb, name=sslb.name+'.axlb', artist=ax)
+        # this is the location needed for the spine.
+        axspinelb = LayoutBox(parent=axlb,
+            name=axlb.name+'.axspinelb', artist=None)
+
+        # now do the layout based on ax...
+        fig = ax.get_figure()
+        renderer = fig.canvas.get_renderer()
+        pos = ax.get_position()
+        invTransFig = fig.transFigure.inverted().transform_bbox
+        bbox = invTransFig(ax.get_tightbbox(renderer=renderer))
+        # leftpad = 0; rightpad=0; bottompad=0.; toppad=0.
+        axspinelb.set_left_margin_min(-bbox.x0+pos.x0+leftpad)
+        axspinelb.set_right_margin_min(bbox.x1-pos.x1+rightpad)
+        axspinelb.set_bottom_margin_min(-bbox.y0+pos.y0+bottompad)
+        axspinelb.set_top_margin_min(bbox.y1-pos.y1+toppad)
+
+        return sslb, axlb, axspinelb
+
+    def place_children(self):
+        for child in self.children:
+            child.place_children()
+            ax = child.artist
+            if (child and hasmethod(ax,'set_position')):
+                ax.set_position(child.get_rect())
 
     def __repr__(self):
         args = (self.name, self.left.value(), self.bottom.value(),
@@ -368,41 +441,67 @@ def align(boxes, attr):
         cons= (getattr(boxes[0], attr) == getattr(box, attr))
         boxes[0].solver.addConstraint(cons | 'medium')
 
-def match_left_margins(boxes):
+
+
+def match_top_margins(boxes, levels=1):
     box0 = boxes[0]
+    top0 = box0
+    for n in range(levels):
+        top0 = top0.parent
     for box in boxes[1:]:
-        c = (box0.left-box0.parent.left == box.left-box.parent.left)
+        topb = box
+        for n in range(levels):
+            topb = topb.parent
+        c = (box0.top-top0.top == box.top-topb.top)
         box0.solver.addConstraint(c | 'strong')
 
-def match_bottom_margins(boxes):
+def match_bottom_margins(boxes, levels=1):
     box0 = boxes[0]
+    top0 = box0
+    for n in range(levels):
+        top0 = top0.parent
     for box in boxes[1:]:
-        c = (box0.bottom-box0.parent.bottom == box.bottom-box.parent.bottom)
+        topb = box
+        for n in range(levels):
+            topb = topb.parent
+        c = (box0.bottom-top0.bottom == box.bottom-topb.bottom)
         box0.solver.addConstraint(c | 'strong')
 
-def match_right_margins(boxes):
+def match_left_margins(boxes, levels=1):
     box0 = boxes[0]
+    top0 = box0
+    for n in range(levels):
+        top0 = top0.parent
     for box in boxes[1:]:
-        c = (box0.right-box0.parent.right == box.right-box.parent.right)
+        topb = box
+        for n in range(levels):
+            topb = topb.parent
+        c = (box0.left-top0.left == box.left-topb.left)
         box0.solver.addConstraint(c | 'strong')
 
-def match_top_margins(boxes):
+def match_right_margins(boxes, levels=1):
     box0 = boxes[0]
+    top0 = box0
+    for n in range(levels):
+        top0 = top0.parent
     for box in boxes[1:]:
-        c = (box0.top-box0.parent.top == box.top-box.parent.top)
+        topb = box
+        for n in range(levels):
+            topb = topb.parent
+        c = (box0.right-top0.right == box.right-topb.right)
         box0.solver.addConstraint(c | 'strong')
 
-def match_width_margins(boxes):
-    match_left_margins(boxes)
-    match_right_margins(boxes)
+def match_width_margins(boxes, levels=1):
+    match_left_margins(boxes, levels=levels)
+    match_right_margins(boxes, levels=levels)
 
-def match_height_margins(boxes):
-    match_top_margins(boxes)
-    match_bottom_margins(boxes)
+def match_height_margins(boxes, levels=1):
+    match_top_margins(boxes, levels=levels)
+    match_bottom_margins(boxes, levels=levels)
 
-def match_margins(boxes):
-    match_width_margins(boxes)
-    match_height_margins(boxes)
+def match_margins(boxes, levels=1):
+    match_width_margins(boxes, levels=levels)
+    match_height_margins(boxes, levels=levels)
 
 def constrained_layout(fig, parent=None, axs=None, leftpad=0, bottompad=0,
                       rightpad=0, toppad=0, pad=None, name=None):
